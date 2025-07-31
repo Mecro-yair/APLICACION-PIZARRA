@@ -6,6 +6,7 @@ from PyQt5.QtGui import QPainter, QPen, QPainterPath, QColor, QPixmap, QTransfor
 from PyQt5.QtCore import Qt, QPoint, QRectF
 import sys
 from PyQt5.QtWidgets import QSizePolicy
+from PyQt5.QtGui import QIcon
 
 class Trazo:
     def __init__(self, path, color, width):
@@ -407,6 +408,7 @@ class Ventana(QMainWindow):
             widget = self.panel_imagenes.itemAt(i).widget()
             if isinstance(widget, Miniatura):
                 widget.seleccionada = (widget == miniatura_activa)
+                widget.actualizar_estilo()  # << AÑADE ESTA LÍNEA
 
 
 
