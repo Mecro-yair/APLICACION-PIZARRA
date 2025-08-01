@@ -7,7 +7,10 @@ from PyQt5.QtCore import Qt, QPoint, QRectF
 import sys
 from PyQt5.QtWidgets import QSizePolicy
 from PyQt5.QtGui import QIcon
-
+from PyQt5.QtWidgets import QTabWidget
+from PyQt5.QtPrintSupport import QPrinter
+from PyQt5.QtGui import QPainter
+from PyQt5.QtWidgets import QTabBar
 class Trazo:
     def __init__(self, path, color, width):
         self.path = path
@@ -49,6 +52,7 @@ class Pizarra(QWidget):
     def __init__(self):
         super().__init__()
         self.setStyleSheet("background-color: transparent; border: none;")
+        self.exportando = False  # nuevo atributo
         self.trazos = []
         self.undo_stack = []
         self.redo_stack = []
@@ -230,8 +234,11 @@ class Pizarra(QWidget):
         margen = 4
         rect = self.rect().adjusted(margen, margen, -margen, -margen)
         painter.fillRect(rect, Qt.white)
-        painter.setPen(QPen(Qt.black, 2))
-        painter.drawRect(rect)
+
+        if not self.exportando:
+            painter.setPen(QPen(Qt.black, 2))
+            painter.drawRect(rect)
+
 
         for img in self.imagenes_colocadas:
             transform = QTransform()
@@ -291,10 +298,24 @@ class Ventana(QMainWindow):
         self.setStyleSheet("background-color: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1, stop:0 #f0f0f0, stop:1 #d0d0d0);")
         self.showFullScreen()
 
-        self.pizarra = Pizarra()
+        self.pestanas = QTabWidget()
+        self.pestanas.currentChanged.connect(self.cambio_pestana)
+
+        self.pestanas.setTabsClosable(True)
+        self.pestanas.tabCloseRequested.connect(self.eliminar_hoja)
+        self.panel_imagenes = QVBoxLayout()
+        self.nueva_hoja()           # crea la primera hoja
+        self.pestanas.tabBar().setTabButton(self.pestanas.count() - 1, QTabBar.RightSide, None)
+        self.pestanas.addTab(QWidget(), "+")  # añade pestaña "+" al final
+
         self.panel_imagenes = QVBoxLayout()
 
         self.init_ui()
+    
+    @property
+    def pizarra(self):
+        return self.pestanas.currentWidget()
+
 
     def init_ui(self):
         contenedor = QWidget()
@@ -350,6 +371,7 @@ class Ventana(QMainWindow):
         btn_rehacer.setStyleSheet("color: black; font-size: 24px;")
         btn_rehacer.clicked.connect(self.pizarra.redo)
         botones.addWidget(btn_rehacer, 0, len(colores)+3)
+        
 
         btn_limpiar = QPushButton("🗑️")
         btn_limpiar.setStyleSheet("color: white; font-size: 24px;")
@@ -361,8 +383,16 @@ class Ventana(QMainWindow):
         btn_exportar_imagen.clicked.connect(self.exportar_imagen)
         botones.addWidget(btn_exportar_imagen, 1, 0)
 
+        btn_exportar_pdf = QPushButton("📄 PDF")
+        btn_exportar_pdf.setStyleSheet("color: black; font-size: 20px;")
+        btn_exportar_pdf.clicked.connect(self.exportar_pdf)
+        botones.addWidget(btn_exportar_pdf, 1, 1)
+
+
+
+
         layout_izquierdo.addLayout(botones)
-        layout_izquierdo.addWidget(self.pizarra)
+        layout_izquierdo.addWidget(self.pestanas)
 
         panel_scroll = QScrollArea()
         panel_widget = QWidget()
@@ -393,6 +423,75 @@ class Ventana(QMainWindow):
             pixmap = QPixmap(archivo)
             mini = Miniatura(pixmap, self)
             self.panel_imagenes.addWidget(mini)
+
+    def nueva_hoja(self):
+        nueva_pizarra = Pizarra()
+        index = self.pestanas.count() - 1  # antes del '+'
+        self.pestanas.insertTab(index, nueva_pizarra, f"Hoja {index + 1}")
+        self.pestanas.setCurrentIndex(index)
+
+    def cambio_pestana(self, index):
+        if self.pestanas.tabText(index) == "+":  # si hizo clic en la pestaña "+"
+            self.nueva_hoja()
+
+
+    def eliminar_hoja(self, index):
+        if self.pestanas.tabText(index) != "+" and self.pestanas.count() > 2:
+            self.pestanas.removeTab(index)
+            self.renombrar_hojas()
+
+    def renombrar_hojas(self):
+        for i in range(self.pestanas.count() - 1):  # Excluye la última pestaña "+"
+            self.pestanas.setTabText(i, f"Hoja {i + 1}")
+
+
+
+    def exportar_pdf(self):
+        nombre_archivo, _ = QFileDialog.getSaveFileName(self, "Guardar como PDF", "", "Archivos PDF (*.pdf)")
+        if nombre_archivo:
+            if not nombre_archivo.endswith(".pdf"):
+                nombre_archivo += ".pdf"
+
+            printer = QPrinter(QPrinter.HighResolution)
+            printer.setOutputFormat(QPrinter.PdfFormat)
+            printer.setOutputFileName(nombre_archivo)
+            printer.setOrientation(QPrinter.Landscape)
+            printer.setPaperSize(QPrinter.A4)
+            printer.setPageMargins(0, 0, 0, 0, QPrinter.Millimeter)
+            printer.setFullPage(True)
+
+            painter = QPainter()
+            if not painter.begin(printer):
+                print("Error al iniciar el PDF")
+                return
+
+            total_hojas = self.pestanas.count()
+            for i in range(total_hojas):
+                pizarra = self.pestanas.widget(i)
+
+                # Activar modo exportación (para no dibujar bordes negros)
+                pizarra.exportando = True
+
+                pixmap = QPixmap(pizarra.size())
+                pixmap.fill(Qt.white)
+
+                painter_pizarra = QPainter(pixmap)
+                pizarra.render(painter_pizarra)
+                painter_pizarra.end()
+
+                # Restaurar modo normal
+                pizarra.exportando = False
+
+                page_rect = printer.pageRect()
+                scaled_pixmap = pixmap.scaled(page_rect.size(), Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+
+                painter.drawPixmap(0, 0, scaled_pixmap)
+
+                if i < total_hojas - 1:
+                    printer.newPage()
+
+            painter.end()
+
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Escape:
